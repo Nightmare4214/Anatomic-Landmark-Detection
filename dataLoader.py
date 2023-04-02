@@ -1,10 +1,11 @@
-from __future__ import print_function, division
-import torch
-import numpy as np
-from torch.utils.data import Dataset, DataLoader
 import os
-from skimage import io, transform
+
+import numpy as np
 import pandas as pd
+import torch
+from skimage import io, transform
+from torch.utils.data import Dataset
+
 
 class Rescale(object):
     """Rescale the image in a sample to a given size.
@@ -37,6 +38,7 @@ class Rescale(object):
         landmarks = landmarks * [1 / (w - 1), 1 / (h - 1)]
 
         return {'image': img, 'landmarks': landmarks}
+
 
 class RandomCrop(object):
     """Crop randomly the image in a sample.
