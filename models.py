@@ -232,11 +232,11 @@ class fusionVGG19(nn.Module):
         # self.avgPool4t = nn.AvgPool2d(4, 4)
         # self.avgPool2t = nn.AvgPool2d(2, 2)
         self.attentionLayer1 = nn.Sequential(
-            nn.Linear(500, 128, bias=False),  # (256, 1, 128)
-            nn.BatchNorm1d(1, track_running_stats=False),
+            nn.Linear(500, 128, bias=False),  # (B, 1, 256, 128)
+            nn.BatchNorm2d(1, track_running_stats=False),
             nn.Tanh(),
-            nn.Linear(128, config.landmarkNum * 3, bias=False),  # (256, 1, 57)
-            nn.Softmax(dim=0)  # x.sum(dim=0) == torch.ones(1, 57)
+            nn.Linear(128, config.landmarkNum * 3, bias=False),  # (B, 1, 256, config.landmarkNum * 3)
+            nn.Softmax(dim=2)
         )
 
         # moduleList = []
@@ -295,53 +295,53 @@ class fusionVGG19(nn.Module):
 
         return coordinateMean1, coordinateMean2, coordinateDev
 
-    def getAttention(self, bone, fnum):  # (1,256,200,160)
-        bone = self.avgPool8t(bone).view(fnum, -1)  # (1,256,200,160)->(1, 256, 25, 20)->(256, 500)
-        bone = bone.unsqueeze(1)  # (256, 1, 500)
-        y = self.attentionLayer1(bone).squeeze(1).transpose(-1, -2)  # (256, 1, 57)->(256, 57)->(57, 256)
+    def getAttention(self, bone, fnum):  # (B,256,200,160)
+        batch, channel = bone.shape[:2]
+        bone = self.avgPool8t(bone).view(batch, channel, -1)  # (B,256,200,160)->(B,256,25,20)->(B,256,500)
+        bone = bone.unsqueeze(1)  # (B, 1, 256, 500)
+        y = self.attentionLayer1(bone).squeeze(1).transpose(-1, -2)  # (B, 1, 256, 57)->(B, 256, 57)->(B, 57, 256)
         return y
 
-    def predictionWithAttention(self, bone, attentions):  # (1, 256, 200, 160), (57, 256)
-        featureNum, channelNum = attentions.shape  # 57, 256
-
+    def predictionWithAttention(self, bone, attentions):  # (B, 256, 200, 160), (B, 57, 256)
+        batch, featureNum, channelNum = attentions.shape  # B, 57, 256
         attentionMaps = []
         for i in range(featureNum):
-            attention = attentions[i, :]  # (256,)
-            attention = attention.view(1, channelNum, 1, 1)  # (1, 256, 1, 1)
+            attention = attentions[:, i, :]  # (B, 256)
+            attention = attention.view(batch, channelNum, 1, 1)  # (B, 256, 1, 1)
             attentionMap = attention * bone * channelNum
-            attentionMaps.append(self.moduleList[i](attentionMap))  # [(1, 1, 200, 160)]
+            attentionMaps.append(self.moduleList[i](attentionMap))  # [(B, 1, 200, 160)]
 
-        attentionMaps = torch.stack(attentionMaps).squeeze().unsqueeze(0)  # (1, 57, 200, 160)
-        # attentionMaps = torch.concat(attentionMaps, dim=1)
+        attentionMaps = torch.concat(attentionMaps, dim=1)  # (B, 57, 200, 160)
+        # attentionMaps = torch.stack(attentionMaps).squeeze().unsqueeze(0)  # (1, 57, 200, 160)
         return attentionMaps
 
-    def forward(self, x):  # (1, 3, 800, 640)
-        x = self.VGG_layer1(x)  # (1, 128, 200, 160)
-        f1 = self.f_conv1(x)  # (1, 64, 200, 160)
+    def forward(self, x):  # (B, 3, 800, 640)
+        x = self.VGG_layer1(x)  # (B, 128, 200, 160)
+        f1 = self.f_conv1(x)  # (B, 64, 200, 160)
 
-        x = self.VGG_layer2(x)  # (1, 256, 100, 80)
-        f2 = self.f_conv2(x)  # (1, 64, 100, 80)
+        x = self.VGG_layer2(x)  # (B, 256, 100, 80)
+        f2 = self.f_conv2(x)  # (B, 64, 100, 80)
 
-        x = self.VGG_layer3(x)  # (1, 512, 50, 40)
-        f3 = self.f_conv3(x)  # (1, 64, 50, 40)
+        x = self.VGG_layer3(x)  # (B, 512, 50, 40)
+        f3 = self.f_conv3(x)  # (B, 64, 50, 40)
 
-        x = self.VGG_layer4(x)  # (1, 512, 25, 20)
-        f4 = self.f_conv4(x)  # (1, 64, 25, 20)
+        x = self.VGG_layer4(x)  # (B, 512, 25, 20)
+        f4 = self.f_conv4(x)  # (B, 64, 25, 20)
 
-        f2 = self.Upsample2(f2)  # (1, 64, 200, 160)
-        f3 = self.Upsample4(f3)  # (1, 64, 200, 160)
-        f4 = self.Upsample8(f4)  # (1, 64, 200, 160)
-        bone = torch.cat((f1, f2, f3, f4), 1)  # (1,256,200,160)
+        f2 = self.Upsample2(f2)  # (B, 64, 200, 160)
+        f3 = self.Upsample4(f3)  # (B, 64, 200, 160)
+        f4 = self.Upsample8(f4)  # (B, 64, 200, 160)
+        bone = torch.cat((f1, f2, f3, f4), 1)  # (B,256,200,160)
 
         # Attentive Feature Pyramid Fusion
-        bone = self.dilated_block(bone)  # (1,256,200,160)
+        bone = self.dilated_block(bone)  # (B,256,200,160)
         attention = self.getAttention(bone, self.fnum * 4)  # (57, 256)
         y = self.Upsample4(self.predictionWithAttention(bone, attention))
 
         # predicting landmarks with the integral operation
         # coordinateMean1, coordinateMean2, coordinateDev = self.getCoordinate(y)
 
-        return [y]  # (1,57,800,640)
+        return [y]  # (B,57,800,640)
 
 
 if __name__ == '__main__':
@@ -356,5 +356,5 @@ if __name__ == '__main__':
     if version.parse(torch.__version__) >= version.parse('2.0.0'):
         torch.set_float32_matmul_precision('high')
         model_ft = torch.compile(model_ft)
-    x = torch.randn((1, 3, 800, 640)).cuda(config.use_gpu)
+    x = torch.randn((2, 3, 800, 640)).cuda(config.use_gpu)
     model_ft(x)
