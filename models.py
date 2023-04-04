@@ -247,6 +247,8 @@ class fusionVGG19(nn.Module):
                       range(config.landmarkNum * 3)]
 
         self.moduleList = nn.ModuleList(moduleList)
+        # self.moduleList = nn.Conv2d(fnum * 4 * config.landmarkNum * 3, config.landmarkNum * 3, kernel_size=(1, 1),
+        #                             stride=1, padding=0, groups=config.landmarkNum * 3)
         self.dilated_block = dilationInceptionModule(fnum * 4, fnum * 4)
         self.prediction = nn.Conv2d(fnum * 4, config.landmarkNum * 3, kernel_size=(1, 1), stride=1, padding=0)
         self.Upsample2 = nn.Upsample(scale_factor=2, mode='bilinear')
@@ -304,6 +306,11 @@ class fusionVGG19(nn.Module):
 
     def predictionWithAttention(self, bone, attentions):  # (B, 256, 200, 160), (B, 57, 256)
         batch, featureNum, channelNum = attentions.shape  # B, 57, 256
+        # simple option
+        # attentionMaps = torch.einsum('bchw,bdc->bdchw', bone, attentions)
+        # attentionMaps = attentionMaps.view(batch, featureNum * channelNum, self.higth, self.width)
+        # attentionMaps = nn.Conv2d(featureNum * channelNum, featureNum, kernel_size=(1, 1), stride=1, padding=0,
+        #                           groups=featureNum)(attentionMaps)
         attentionMaps = []
         for i in range(featureNum):
             attention = attentions[:, i, :]  # (B, 256)
