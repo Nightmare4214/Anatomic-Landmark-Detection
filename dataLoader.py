@@ -35,7 +35,7 @@ class Rescale(object):
 
         new_h, new_w = int(new_h), int(new_w)
         img = transform.resize(image, (new_h, new_w), mode='constant')
-        landmarks = landmarks * [1 / (w - 1), 1 / (h - 1)]
+        landmarks = landmarks * [1 / (w - 1), 1 / (h - 1)]  # 0-1
 
         return {'image': img, 'landmarks': landmarks}
 

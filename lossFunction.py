@@ -1,3 +1,4 @@
+import argparse
 import torch
 import torch.nn as nn
 import numpy as np
@@ -18,18 +19,18 @@ class fusionLossFunc_improved(nn.Module):
         self.binaryLoss = nn.BCEWithLogitsLoss(reduction='mean').cuda(config.use_gpu)
         self.l1Loss = torch.nn.L1Loss().cuda(config.use_gpu)
 
-        self.offsetMapx = np.ones((self.higth * 2, self.width * 2))
-        self.offsetMapy = np.ones((self.higth * 2, self.width * 2))
-
         self.HeatMap = np.zeros((self.higth * 2, self.width * 2))
-        self.mask = np.zeros((self.higth * 2, self.width * 2))
+        # self.mask = np.zeros((self.higth * 2, self.width * 2))
 
-        # ~ self.binary_class_groundTruth = Variable(torch.zeros(imageNum, landmarkNum, h, w).cuda(self.use_gpu))
-        self.offsetMapX_groundTruth = torch.zeros(self.imageNum, self.landmarkNum, self.higth, self.width).cuda(self.use_gpu)
-        self.offsetMapY_groundTruth = torch.zeros(self.imageNum, self.landmarkNum, self.higth, self.width).cuda(self.use_gpu)
-        self.binary_class_groundTruth1 = torch.zeros(self.imageNum, self.landmarkNum, self.higth, self.width).cuda(self.use_gpu)
-        self.binary_class_groundTruth2 = torch.zeros(self.imageNum, self.landmarkNum, self.higth, self.width).cuda(self.use_gpu)
-        self.offsetMask = torch.zeros(self.imageNum, self.landmarkNum, self.higth, self.width).cuda(self.use_gpu)
+        self.offsetMapX_groundTruth = torch.zeros(self.imageNum, self.landmarkNum, self.higth, self.width).cuda(
+            self.use_gpu)
+        self.offsetMapY_groundTruth = torch.zeros(self.imageNum, self.landmarkNum, self.higth, self.width).cuda(
+            self.use_gpu)
+        self.binary_class_groundTruth1 = torch.zeros(self.imageNum, self.landmarkNum, self.higth, self.width).cuda(
+            self.use_gpu)
+        # self.binary_class_groundTruth2 = torch.zeros(self.imageNum, self.landmarkNum, self.higth, self.width).cuda(
+        #     self.use_gpu)
+        # self.offsetMask = torch.zeros(self.imageNum, self.landmarkNum, self.higth, self.width).cuda(self.use_gpu)
 
         rr = config.R1
         dev = 4
@@ -39,45 +40,42 @@ class fusionLossFunc_improved(nn.Module):
                 temdis = utils.Mydist(referPoint, (i, j))
                 if temdis <= rr:
                     self.HeatMap[i][j] = 1
-        rr = config.R2
-        referPoint = (self.higth, self.width)
-        for i in range(referPoint[0] - rr, referPoint[0] + rr + 1):
-            for j in range(referPoint[1] - rr, referPoint[1] + rr + 1):
-                temdis = utils.Mydist(referPoint, (i, j))
-                if temdis <= rr:
-                    self.mask[i][j] = 1
+        # rr = config.R2
+        # referPoint = (self.higth, self.width)
+        # for i in range(referPoint[0] - rr, referPoint[0] + rr + 1):
+        #     for j in range(referPoint[1] - rr, referPoint[1] + rr + 1):
+        #         temdis = utils.Mydist(referPoint, (i, j))
+        #         if temdis <= rr:
+        #             self.mask[i][j] = 1
 
-        for i in range(2 * self.higth):
-            self.offsetMapx[i, :] = self.offsetMapx[i, :] * i
-
-        for i in range(2 * self.width):
-            self.offsetMapy[:, i] = self.offsetMapy[:, i] * i
-
+        self.offsetMapx = torch.arange(2 * self.higth)[:, None].expand(-1, 2 * self.width)
         self.offsetMapx = referPoint[0] - self.offsetMapx
+        self.offsetMapx = self.offsetMapx.cuda(self.use_gpu).float() / config.R2
+
+        self.offsetMapy = torch.arange(2 * self.width)[None, :].expand(2 * self.higth, -1)
         self.offsetMapy = referPoint[1] - self.offsetMapy
+        self.offsetMapy = self.offsetMapy.cuda(self.use_gpu).float() / config.R2
+
         self.HeatMap = torch.from_numpy(self.HeatMap).cuda(self.use_gpu).float()
-        self.mask = torch.from_numpy(self.mask).cuda(self.use_gpu).float()
-        self.offsetMapx = torch.from_numpy(self.offsetMapx).cuda(self.use_gpu).float() / config.R2
-        self.offsetMapy = torch.from_numpy(self.offsetMapy).cuda(self.use_gpu).float() / config.R2
+        # self.mask = torch.from_numpy(self.mask).cuda(self.use_gpu).float()
 
-        self.zeroTensor = torch.zeros((self.imageNum, self.landmarkNum, self.higth, self.width)).cuda(self.use_gpu)
+        # self.zeroTensor = torch.zeros((self.imageNum, self.landmarkNum, self.higth, self.width)).cuda(self.use_gpu)
 
-        return
+    # def getOffsetMask(self, h, w, X, Y):
+    #     for imageId in range(self.imageNum):
+    #         for landmarkId in range(self.landmarkNum):
+    #             self.offsetMask[imageId, landmarkId, :, :] = self.mask[
+    #                                                          h - X[imageId][landmarkId]: 2 * h - X[imageId][landmarkId],
+    #                                                          w - Y[imageId][landmarkId]: 2 * w - Y[imageId][landmarkId]]
+    #     return self.offsetMask
 
-    def getOffsetMask(self, h, w, X, Y):
-        for imageId in range(self.imageNum):
-            for landmarkId in range(self.landmarkNum):
-                self.offsetMask[imageId, landmarkId, :, :] = self.mask[
-                                                             h - X[imageId][landmarkId]: 2 * h - X[imageId][landmarkId],
-                                                             w - Y[imageId][landmarkId]: 2 * w - Y[imageId][landmarkId]]
-        return self.offsetMask
-
-    def forward(self, featureMaps, landmarks):
+    def forward(self, featureMaps, landmarks):  # (B,57,800,640) (B, 19, 2)
         h, w = featureMaps.size()[2], featureMaps.size()[3]
-        X = np.round((landmarks[:, :, 0] * (h - 1)).numpy()).astype("int")
-        Y = np.round((landmarks[:, :, 1] * (w - 1)).numpy()).astype("int")
+        X = np.round((landmarks[:, :, 0] * (h - 1)).numpy()).astype("int")  # (B, 19)
+        Y = np.round((landmarks[:, :, 1] * (w - 1)).numpy()).astype("int")  # (B, 19)
         binary_class_groundTruth = self.binary_class_groundTruth1
 
+        # generate heatmap and offset for every landmark
         for imageId in range(self.imageNum):
             for landmarkId in range(self.landmarkNum):
                 # ~ self.binary_class_groundTruth[imageId, landmarkId, :, :] = self.HeatMap[h - X[imageId][landmarkId]: 2*h - X[imageId][landmarkId], w - Y[imageId][landmarkId]: 2*w - Y[imageId][landmarkId]]
@@ -96,7 +94,7 @@ class fusionLossFunc_improved(nn.Module):
                                                                              landmarkId],
                                                                          w - Y[imageId][landmarkId]: 2 * w - Y[imageId][
                                                                              landmarkId]]
-
+        # calculate loss and mean over landmark
         indexs = binary_class_groundTruth > 0
         temloss = [
             [2 * self.binaryLoss(featureMaps[imageId][landmarkId], binary_class_groundTruth[imageId][landmarkId]),
@@ -111,3 +109,29 @@ class fusionLossFunc_improved(nn.Module):
                 self.imageNum * self.landmarkNum)
 
         return loss1
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--batchSize", type=int, default=1)
+    parser.add_argument("--landmarkNum", type=int, default=19)
+    parser.add_argument("--image_scale", default=(800, 640), type=tuple)
+    parser.add_argument("--use_gpu", type=int, default=0)
+    parser.add_argument("--spacing", type=float, default=0.1)
+    parser.add_argument("--R1", type=int, default=41)
+    parser.add_argument("--R2", type=int, default=41)
+    parser.add_argument("--epochs", type=int, default=400)
+    parser.add_argument("--data_enhanceNum", type=int, default=1)
+    parser.add_argument("--stage", type=str, default="train")
+    parser.add_argument("--saveName", type=str, default="test1")
+    parser.add_argument("--testName", type=str, default="30cepha100_fusion_unsuper.pkl")
+    parser.add_argument("--dataRoot", type=str, default="/mnt/data/datasets/ceph")
+    parser.add_argument("--supervised_dataset_train", type=str, default="cepha/")
+    parser.add_argument("--supervised_dataset_test", type=str, default="cepha/")
+    parser.add_argument("--unsupervised_dataset", type=str, default="cepha/")
+    parser.add_argument("--trainingSetCsv", type=str, default="cepha_train.csv")
+    parser.add_argument("--testSetCsv", type=str, default="cepha_val.csv")
+    parser.add_argument("--unsupervisedCsv", type=str, default="cepha_val.csv")
+    config = parser.parse_args()
+
+    loss = fusionLossFunc_improved(config)
